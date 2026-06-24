@@ -8,7 +8,7 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { Agent } from "~/agents/index.js";
+import { Agent } from "../src/agents/index.js";
 import YAML from "yaml";
 
 interface WorkflowInput {
@@ -39,6 +39,7 @@ async function main(): Promise<void> {
   const workflow = YAML.parse(workflowContent);
 
   // Get all available agent:model combinations
+  await Agent.loadAll();
   const agents = Agent.list();
   const combinations: Array<{ agent: string; model: string }> = [];
 

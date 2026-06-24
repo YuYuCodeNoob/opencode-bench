@@ -6,6 +6,46 @@ on:
         description: opencode:opencode/gpt-5-codex
         type: boolean
         default: false
+      opencode_opencode_gpt_5.1_codex:
+        description: opencode:opencode/gpt-5.1-codex
+        type: boolean
+        default: false
+      opencode_opencode_claude_sonnet_4_5:
+        description: opencode:opencode/claude-sonnet-4-5
+        type: boolean
+        default: false
+      opencode_opencode_claude_opus_4_5:
+        description: opencode:opencode/claude-opus-4-5
+        type: boolean
+        default: false
+      opencode_opencode_glm_4.6:
+        description: opencode:opencode/glm-4.6
+        type: boolean
+        default: false
+      opencode_opencode_glm_4.7_free:
+        description: opencode:opencode/glm-4.7-free
+        type: boolean
+        default: false
+      opencode_opencode_gemini_3_pro:
+        description: opencode:opencode/gemini-3-pro
+        type: boolean
+        default: false
+      opencode_opencode_qwen3_coder:
+        description: opencode:opencode/qwen3-coder
+        type: boolean
+        default: false
+      opencode_opencode_kimi_k2:
+        description: opencode:opencode/kimi-k2
+        type: boolean
+        default: false
+      opencode_opencode_grok_code:
+        description: opencode:opencode/grok-code
+        type: boolean
+        default: false
+      opencode_opencode_alpha_gd4:
+        description: opencode:opencode/alpha-gd4
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read

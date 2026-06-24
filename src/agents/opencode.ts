@@ -28,11 +28,19 @@ const opencodeConfig = {
 // The SDK reads this when spawning the server process
 process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify(opencodeConfig);
 
-const opencode = await createOpencode({
-  port: await detectPort(4096),
-  timeout: 1_500_000, // 25 minutes timeout for server startup
-  config: opencodeConfig,
-});
+let opencodePromise: Promise<Awaited<ReturnType<typeof createOpencode>>> | null =
+  null;
+
+async function getOpencode() {
+  if (!opencodePromise) {
+    opencodePromise = createOpencode({
+      port: await detectPort(4096),
+      timeout: 1_500_000, // 25 minutes timeout for server startup
+      config: opencodeConfig,
+    });
+  }
+  return opencodePromise;
+}
 
 const sessionCache = new Map<string, string>();
 
@@ -56,6 +64,7 @@ function sessionKey(model: string, cwd: string): string {
 
 const opencodeAgent: Agent.Definition = {
   async run(model, prompt, options) {
+    const opencode = await getOpencode();
     options.logger.log(`opencode --model ${model} ${prompt}`);
 
     const cacheKey = sessionKey(model, options.cwd);
@@ -133,8 +142,11 @@ const opencodeAgent: Agent.Definition = {
 
     return { actions, usage };
   },
-  cleanup() {
-    opencode.server.close();
+  async cleanup() {
+    if (opencodePromise) {
+      const opencode = await opencodePromise;
+      opencode.server.close();
+    }
   },
 };
 

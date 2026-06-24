@@ -1,7 +1,4 @@
 import { strict as assert } from "node:assert";
-import * as opencodeAgent from "./opencode.js";
-import * as codexAgent from "./codex.js";
-import * as claudeCodeAgent from "./claude-code.js";
 import { Logger } from "../util/logger.js";
 
 export namespace Agent {
@@ -49,13 +46,6 @@ export namespace Agent {
     models: ReadonlyArray<TModel>;
   }
 
-  const agents: Record<string, Registration<any>> = {
-    // Only keep opencode active while debugging timeouts for specific models.
-    opencode: createRegistration("opencode", opencodeAgent),
-    //codex: createRegistration("codex", codexAgent),
-    //"claude-code": createRegistration("claude-code", claudeCodeAgent),
-  };
-
   function createRegistration<TModel extends string>(
     name: string,
     module: {
@@ -72,10 +62,46 @@ export namespace Agent {
     return { name, definition, models };
   }
 
-  export function get(name: string): Registration {
-    const agent = agents[name];
-    if (!agent) throw new Error(`Agent ${name} was not found.`);
-    return agent;
+  const agents: Record<string, Registration<any>> = {};
+
+  async function loadOpenCodeAgent(): Promise<Registration> {
+    const module = await import("./opencode.js");
+    return createRegistration("opencode", module);
+  }
+
+  const agentLoaders: Record<string, () => Promise<Registration>> = {
+    opencode: loadOpenCodeAgent,
+    //codex: () => import("./codex.js").then(m => createRegistration("codex", m)),
+    //"claude-code": () => import("./claude-code.js").then(m => createRegistration("claude-code", m)),
+  };
+
+  export function list(): Registration[] {
+    // Return preloaded agents; full list requires async load
+    return Object.values(agents);
+  }
+
+  export async function get(name: string): Promise<Registration> {
+    const cached = agents[name];
+    if (cached) return cached;
+
+    const loader = agentLoaders[name];
+    if (!loader) throw new Error(`Agent ${name} was not found.`);
+
+    const registration = await loader();
+    agents[name] = registration;
+    return registration;
+  }
+
+  export async function loadAll(): Promise<void> {
+    for (const [name, loader] of Object.entries(agentLoaders)) {
+      if (!agents[name]) {
+        try {
+          agents[name] = await loader();
+        } catch (e) {
+          // Agent unavailable; skip
+        }
+      }
+    }
   }
 
   export function validateModel(agent: Registration, model: string) {
@@ -83,9 +109,5 @@ export namespace Agent {
       throw new Error(
         `Model ${model} is not registered for agent ${agent.name}.`,
       );
-  }
-
-  export function list() {
-    return Object.values(agents);
   }
 }

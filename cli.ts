@@ -105,6 +105,8 @@ cli.command(
 );
 
 try {
+  // Preload agents so list() is populated before command setup
+  await Agent.loadAll();
   await cli.parse();
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);

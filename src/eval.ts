@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { $ } from "bun";
+import { $ } from "./util/shell.js";
 import { generateObject } from "ai";
 import { mkdtemp, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
@@ -46,7 +46,7 @@ export namespace Eval {
       logger: Logger.Instance;
     },
   ) {
-    const agent = Agent.get(agentName);
+    const agent = await Agent.get(agentName);
     Agent.validateModel(agent, modelId);
     const task = await Task.get(taskId);
     const cwd = await mkdtemp(join(tmpdir(), "openreval-"));
