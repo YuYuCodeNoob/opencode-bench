@@ -8,8 +8,8 @@ import type { generateObject } from "ai";
 type GenerateObjectOptions = Parameters<typeof generateObject>[0];
 type SupportedModel = NonNullable<GenerateObjectOptions["model"]>;
 
-const DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
-const OPENCODE_PREFIX = "opencode/";
+const DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1";
+const OPENCODE_PREFIX = "opencode-go/";
 const API_KEY_ENV_VARS = ["OPENCODE_API_KEY"];
 
 type ProviderBundle = {
@@ -32,9 +32,8 @@ function resolveZenApiKey(): string {
   assert(
     false,
     [
-      "Missing OpenCode Zen API key.",
+      "Missing OpenCode API key.",
       "Set OPENCODE_API_KEY before running the CLI.",
-      "See https://opencode.ai/docs/zen/ for instructions.",
     ].join(" "),
   );
 }
@@ -100,7 +99,8 @@ function inferEndpoint(modelId: string): "responses" | "anthropic" | "chat" {
   if (
     lower.startsWith("kimi") ||
     lower.startsWith("grok") ||
-    lower.startsWith("qwen")
+    lower.startsWith("qwen") ||
+    lower.startsWith("deepseek")
   ) {
     return "chat";
   }
@@ -110,7 +110,7 @@ function inferEndpoint(modelId: string): "responses" | "anthropic" | "chat" {
 
 export function getZenLanguageModel(modelId: string): SupportedModel {
   const normalized = normalizeModelId(modelId);
-  const cacheKey = `zen:${normalized}`;
+  const cacheKey = `go:${normalized}`;
 
   if (modelCache.has(cacheKey)) {
     return modelCache.get(cacheKey)!;

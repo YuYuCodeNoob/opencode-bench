@@ -7,11 +7,13 @@ const agents = Agent.list();
 const tasks = await Task.listNames();
 const include = tasks.flatMap((task) =>
   agents.flatMap((agent) =>
-    agent.models.map((model) => ({
-      eval: task,
-      model,
-      agent: agent.name,
-    })),
+    agent.models
+      .filter((m) => m !== "*")
+      .map((model) => ({
+        eval: task,
+        model,
+        agent: agent.name,
+      })),
   ),
 );
 

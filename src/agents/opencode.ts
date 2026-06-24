@@ -21,6 +21,15 @@ const opencodeConfig = {
         timeout: false, // disable timeout for OpenCode provider requests
       },
     },
+    deepseek: {
+      api: "openai",
+      name: "DeepSeek",
+      env: ["DEEPSEEK_API_KEY"],
+      options: {
+        baseURL: "https://api.deepseek.com",
+        timeout: false,
+      },
+    },
   },
 } satisfies OpencodeConfig;
 
@@ -45,17 +54,10 @@ async function getOpencode() {
 const sessionCache = new Map<string, string>();
 
 export const models: string[] = [
-  "opencode/gpt-5-codex",
-  "opencode/gpt-5.1-codex",
-  "opencode/claude-sonnet-4-5",
-  "opencode/claude-opus-4-5",
-  "opencode/glm-4.6",
-  "opencode/glm-4.7-free",
-  "opencode/gemini-3-pro",
-  "opencode/qwen3-coder",
-  "opencode/kimi-k2",
-  "opencode/grok-code",
-  "opencode/alpha-gd4",
+  "opencode-go/deepseek-v4-flash",
+  "opencode-go/deepseek-v4-pro",
+  "deepseek/deepseek-v4-flash",
+  "deepseek/deepseek-v4-pro",
 ];
 
 function sessionKey(model: string, cwd: string): string {
@@ -78,23 +80,6 @@ const opencodeAgent: Agent.Definition = {
       });
       sessionID = session.id;
       sessionCache.set(cacheKey, sessionID);
-    }
-
-    options.logger.log(`Sharing session ${sessionID}...`);
-    try {
-      const { data, error } = await opencode.client.session.share({
-        path: { id: sessionID! },
-        query: { directory: options.cwd },
-      });
-      if (error) throw error;
-
-      const shareUrl = data.share?.url;
-      options.logger.log(`Share URL: ${shareUrl}`);
-    } catch (e) {
-      options.logger.error(
-        `Failed to enable sharing for session ${sessionID}:`,
-        e,
-      );
     }
 
     options.logger.log(`Prompting session ${sessionID}...`);

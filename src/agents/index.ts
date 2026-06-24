@@ -71,8 +71,9 @@ export namespace Agent {
 
   const agentLoaders: Record<string, () => Promise<Registration>> = {
     opencode: loadOpenCodeAgent,
+    "claude-code": () =>
+      import("./claude-code.js").then((m) => createRegistration("claude-code", m)),
     //codex: () => import("./codex.js").then(m => createRegistration("codex", m)),
-    //"claude-code": () => import("./claude-code.js").then(m => createRegistration("claude-code", m)),
   };
 
   export function list(): Registration[] {
@@ -105,6 +106,7 @@ export namespace Agent {
   }
 
   export function validateModel(agent: Registration, model: string) {
+    if (agent.models.includes("*")) return; // wildcard: accept any model
     if (!agent.models.find((entry) => entry === model))
       throw new Error(
         `Model ${model} is not registered for agent ${agent.name}.`,

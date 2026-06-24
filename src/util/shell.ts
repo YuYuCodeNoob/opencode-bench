@@ -1,12 +1,14 @@
 import { execSync } from "node:child_process";
 
-export function $(strings: TemplateStringsArray, ...values: unknown[]) {
+let _cwd: string | undefined;
+
+function shell(strings: TemplateStringsArray, ...values: unknown[]) {
   const cmd = strings.reduce((acc, s, i) => acc + s + (values[i] ?? ""), "");
 
   return {
     quiet: async () => {
       try {
-        execSync(cmd, { stdio: "ignore" });
+        execSync(cmd, { stdio: "ignore", cwd: _cwd });
       } catch (e: any) {
         const err = new Error(e.message || "Command failed") as any;
         err.status = e.status || 1;
@@ -19,6 +21,7 @@ export function $(strings: TemplateStringsArray, ...values: unknown[]) {
         return execSync(cmd, {
           encoding: "utf-8",
           stdio: ["ignore", "pipe", "pipe"],
+          cwd: _cwd,
         }).trim();
       } catch (e: any) {
         const err = new Error(e.message || "Command failed") as any;
@@ -29,3 +32,9 @@ export function $(strings: TemplateStringsArray, ...values: unknown[]) {
     },
   };
 }
+
+shell.cwd = (path: string) => {
+  _cwd = path;
+};
+
+export const $ = shell;

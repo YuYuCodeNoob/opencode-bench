@@ -31,7 +31,7 @@ export namespace Eval {
     return await withRetries(
       () => runOnce(agentName, modelId, taskId, { logger: opts.logger }),
       {
-        retries: 3,
+        retries: 0,
         timeoutMs: timeoutMins * 60 * 1000,
         logger: opts.logger,
       },

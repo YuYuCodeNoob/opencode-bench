@@ -45,6 +45,7 @@ async function main(): Promise<void> {
 
   for (const agent of agents) {
     for (const model of agent.models) {
+      if (model === "*") continue; // skip wildcard models
       combinations.push({ agent: agent.name, model });
     }
   }
