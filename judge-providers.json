@@ -1,0 +1,9 @@
+{
+  "providers": {
+    "deepseek": {
+      "baseURL": "https://api.deepseek.com",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "api": "openai-compatible"
+    }
+  }
+}

@@ -1,4 +1,7 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -8,133 +11,128 @@ import type { generateObject } from "ai";
 type GenerateObjectOptions = Parameters<typeof generateObject>[0];
 type SupportedModel = NonNullable<GenerateObjectOptions["model"]>;
 
-const DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1";
-const OPENCODE_PREFIX = "opencode-go/";
-const API_KEY_ENV_VARS = ["OPENCODE_API_KEY"];
+type ProviderConfig = {
+  baseURL: string;
+  apiKeyEnv: string;
+  api: "openai" | "openai-compatible" | "anthropic";
+};
 
-type ProviderBundle = {
-  openai: ReturnType<typeof createOpenAI>;
-  openaiCompatible: ReturnType<typeof createOpenAICompatible>;
-  anthropic: ReturnType<typeof createAnthropic>;
+type ConfigFile = {
+  providers: Record<string, ProviderConfig>;
+};
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const CONFIG_PATH = resolve(__dirname, "..", "judge-providers.json");
+
+const OPENCODE_FALLBACK: ProviderConfig = {
+  baseURL: "https://opencode.ai/zen/go/v1",
+  apiKeyEnv: "OPENCODE_API_KEY",
+  api: "openai-compatible",
 };
 
 const modelCache = new Map<string, SupportedModel>();
-let providers: ProviderBundle | undefined;
+const providerInstanceCache = new Map<string, (modelId: string) => SupportedModel>();
+let config: ConfigFile | undefined;
 
-function resolveZenApiKey(): string {
-  for (const envName of API_KEY_ENV_VARS) {
-    const value = process.env[envName]?.trim();
-    if (value) {
-      return value;
-    }
+function loadConfig(): ConfigFile {
+  if (config) return config;
+
+  try {
+    const raw = readFileSync(CONFIG_PATH, "utf-8");
+    config = JSON.parse(raw) as ConfigFile;
+  } catch {
+    config = { providers: {} };
   }
 
+  return config;
+}
+
+function resolveProvider(prefix: string): ProviderConfig {
+  const cfg = loadConfig();
+
+  if (cfg.providers[prefix]) {
+    return cfg.providers[prefix];
+  }
+
+  if (prefix === "opencode-go") {
+    return OPENCODE_FALLBACK;
+  }
+
+  const available = Object.keys(cfg.providers).join(", ");
   assert(
     false,
-    [
-      "Missing OpenCode API key.",
-      "Set OPENCODE_API_KEY before running the CLI.",
-    ].join(" "),
+    `Unknown provider "${prefix}". ` +
+      `Add it to judge-providers.json. ` +
+      `Available: ${available || "(none)"}`,
   );
 }
 
-function resolveZenBaseUrl(): string {
-  const configured = process.env.OPENCODE_ZEN_BASE_URL?.trim();
-  if (!configured) {
-    return DEFAULT_BASE_URL;
-  }
-
-  return configured.replace(/\/+$/, "");
+function resolveApiKey(provider: ProviderConfig): string {
+  const value = process.env[provider.apiKeyEnv]?.trim();
+  assert(
+    value,
+    `Missing API key for provider. Set ${provider.apiKeyEnv} environment variable.`,
+  );
+  return value;
 }
 
-function ensureProviders(): ProviderBundle {
-  if (providers) {
-    return providers;
+function getProviderFn(prefix: string, provider: ProviderConfig): (modelId: string) => SupportedModel {
+  const cached = providerInstanceCache.get(prefix);
+  if (cached) return cached;
+
+  const apiKey = resolveApiKey(provider);
+  const { baseURL, api } = provider;
+
+  let fn: (modelId: string) => SupportedModel;
+
+  switch (api) {
+    case "anthropic": {
+      const anthropic = createAnthropic({ apiKey, baseURL });
+      fn = (modelId) => anthropic(modelId) as unknown as SupportedModel;
+      break;
+    }
+    case "openai": {
+      const openai = createOpenAI({ apiKey, baseURL });
+      fn = (modelId) => openai(modelId) as unknown as SupportedModel;
+      break;
+    }
+    case "openai-compatible":
+    default: {
+      const compat = createOpenAICompatible({
+        apiKey,
+        baseURL,
+        name: prefix,
+      });
+      fn = (modelId) => compat(modelId) as unknown as SupportedModel;
+      break;
+    }
   }
 
-  const apiKey = resolveZenApiKey();
-  const baseURL = resolveZenBaseUrl();
-
-  providers = {
-    openai: createOpenAI({
-      apiKey,
-      baseURL,
-    }),
-    openaiCompatible: createOpenAICompatible({
-      apiKey,
-      baseURL,
-      name: "opencode",
-    }),
-    anthropic: createAnthropic({
-      apiKey,
-      baseURL,
-    }),
-  };
-
-  return providers;
-}
-
-function normalizeModelId(modelId: string): string {
-  const trimmed = modelId.trim();
-  assert(trimmed.length > 0, "Model identifier cannot be empty.");
-
-  if (trimmed.startsWith(OPENCODE_PREFIX)) {
-    return trimmed.slice(OPENCODE_PREFIX.length);
-  }
-
-  return trimmed;
-}
-
-function inferEndpoint(modelId: string): "responses" | "anthropic" | "chat" {
-  const lower = modelId.toLowerCase();
-
-  if (lower.startsWith("claude")) {
-    return "anthropic";
-  }
-
-  if (lower.startsWith("gpt")) {
-    return "responses";
-  }
-
-  if (
-    lower.startsWith("kimi") ||
-    lower.startsWith("grok") ||
-    lower.startsWith("qwen") ||
-    lower.startsWith("deepseek")
-  ) {
-    return "chat";
-  }
-
-  return "responses";
+  providerInstanceCache.set(prefix, fn);
+  return fn;
 }
 
 export function getZenLanguageModel(modelId: string): SupportedModel {
-  const normalized = normalizeModelId(modelId);
-  const cacheKey = `go:${normalized}`;
+  const trimmed = modelId.trim();
+  assert(trimmed.length > 0, "Model identifier cannot be empty.");
 
-  if (modelCache.has(cacheKey)) {
-    return modelCache.get(cacheKey)!;
+  if (modelCache.has(trimmed)) {
+    return modelCache.get(trimmed)!;
   }
 
-  const { openai, openaiCompatible, anthropic } = ensureProviders();
-  const endpoint = inferEndpoint(normalized);
+  const slashIndex = trimmed.indexOf("/");
+  assert(
+    slashIndex > 0,
+    `Model ID must have provider prefix: "provider/model", got "${trimmed}"`,
+  );
 
-  let model: SupportedModel;
-  switch (endpoint) {
-    case "anthropic":
-      model = anthropic(normalized) as unknown as SupportedModel;
-      break;
-    case "responses":
-      model = openai.responses(normalized) as unknown as SupportedModel;
-      break;
-    case "chat":
-    default:
-      model = openaiCompatible.chatModel(
-        normalized,
-      ) as unknown as SupportedModel;
-      break;
-  }
+  const prefix = trimmed.slice(0, slashIndex);
+  const modelName = trimmed.slice(slashIndex + 1);
 
-  modelCache.set(cacheKey, model);
+  const provider = resolveProvider(prefix);
+  const providerFn = getProviderFn(prefix, provider);
+  const model = providerFn(modelName);
+
+  modelCache.set(trimmed, model);
   return model;
 }
