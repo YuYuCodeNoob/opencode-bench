@@ -1,134 +1,84 @@
-import { strict as assert } from "node:assert";
-import process from "node:process";
+import { execFileSync } from "node:child_process";
 
-import {
-  Codex,
-  Usage,
-  type SandboxMode,
-  type Thread,
-  type ThreadItem,
-} from "@openai/codex-sdk";
+import { Codex, type Thread, type ThreadItem } from "@openai/codex-sdk";
 
 import type { Agent } from "./index.js";
 
-const DEFAULT_SANDBOX: SandboxMode = "workspace-write";
+export const models = ["*"];
 
-const codexClient = new Codex();
 const threadCache = new Map<string, Thread>();
 
-export const models = [
-  "gpt-5-codex",
-  "gpt-5.1-codex",
-  // "gpt-5",
-  // "o3",
-  // "o4-mini"
-] as const;
-
-function sessionKey(model: string, cwd: string): string {
-  return `${cwd}::${model}`;
+function sessionKey(cwd: string): string {
+  return cwd;
 }
 
-function logTurnItems(items: ThreadItem[], options: Agent.RunOptions): void {
+function findCodexPath(): string {
+  try {
+    return execFileSync("which", ["codex"]).toString().trim();
+  } catch {
+    return "codex";
+  }
+}
+
+const codexClient = new Codex({ codexPathOverride: findCodexPath() });
+
+function extractTextFromItems(items: ThreadItem[]): string[] {
+  const texts: string[] = [];
   for (const item of items) {
-    try {
-      process.stdout.write(`${options.logger.format(JSON.stringify(item))}\n`);
-    } catch (error) {
-      const sanitizedItem =
-        item.type === "command_execution"
-          ? { ...item, aggregated_output: "<omitted>" }
-          : item;
-      process.stdout.write(
-        `${options.logger.format(JSON.stringify(sanitizedItem))}\n`,
-      );
-      if (error instanceof Error) {
-        process.stderr.write(
-          `${options.logger.format(
-            `Failed to serialize Codex item: ${error.message}`,
-          )}\n`,
-        );
-      }
+    if (item.type === "agent_message") {
+      texts.push(item.text);
     }
   }
+  return texts;
 }
 
-function getOrCreateThread(model: string, cwd: string): Thread {
-  const key = sessionKey(model, cwd);
-  const cached = threadCache.get(key);
-  if (cached) {
-    return cached;
-  }
-
-  const thread = codexClient.startThread({
-    model,
-    sandboxMode: DEFAULT_SANDBOX,
-    workingDirectory: cwd,
-  });
-  threadCache.set(key, thread);
-  return thread;
-}
-
-const codexAgent: Agent.Definition<(typeof models)[number]> = {
+const codexAgent: Agent.Definition = {
   async run(model, prompt, options) {
     options.logger.log(
-      `codex-sdk --model ${model} --sandbox ${DEFAULT_SANDBOX} ${prompt}`,
+      `codex --cd ${options.cwd} (config.toml default model) "${prompt.slice(0, 80)}..."`,
     );
 
-    const key = sessionKey(model, options.cwd);
-    const thread = getOrCreateThread(model, options.cwd);
+    const key = sessionKey(options.cwd);
+    const cached = threadCache.get(key);
 
-    const actions: string[] = [];
-    let usage: Usage;
-    let cost = 0;
-    try {
-      const pricingKey = model;
-      const pricing = openai.models[pricingKey]?.cost;
-      const turn = await thread.run(prompt);
-      assert(turn.usage, "The agent did not emit the usage information.");
-      usage = turn.usage;
-      const billableInput =
-        (usage.input_tokens ?? 0) - (usage.cached_input_tokens ?? 0);
-      const cachedInput = usage.cached_input_tokens ?? 0;
-      const output = usage.output_tokens ?? 0;
-      cost =
-        (billableInput * pricing.input +
-          output * pricing.output +
-          cachedInput * pricing.cache_read) /
-        1_000_000;
-
-      actions.push(...turn.items.map((item) => JSON.stringify(item)));
-      logTurnItems(turn.items, options);
-    } catch (error) {
-      threadCache.delete(key);
-      throw error;
+    let thread: Thread;
+    if (cached) {
+      thread = cached;
+    } else {
+      thread = codexClient.startThread({
+        sandboxMode: "danger-full-access",
+        workingDirectory: options.cwd,
+      });
+      threadCache.set(key, thread);
     }
 
-    return {
-      actions,
-      usage: {
-        input: usage.input_tokens,
-        output: usage.output_tokens,
-        cost,
-      },
-    };
+    let usage = { input: 0, output: 0, cost: 0 };
+
+    try {
+      const turn = await thread.run(prompt);
+      const actions = turn.items.map((item) => JSON.stringify(item));
+
+      if (turn.usage) {
+        usage.input = turn.usage.input_tokens;
+        usage.output = turn.usage.output_tokens;
+      }
+
+      const textParts = extractTextFromItems(turn.items);
+      options.logger.log(
+        `Done: ${textParts.length} messages, input=${usage.input}, output=${usage.output}`,
+      );
+
+      return { actions, usage };
+    } catch (error) {
+      threadCache.delete(key);
+      options.logger.error("Error in codex agent:", error);
+      throw error;
+    }
+  },
+
+  cleanup() {
+    threadCache.clear();
   },
 };
 
 export default codexAgent;
-
-const response = await fetch("https://models.dev/api.json");
-if (!response.ok) {
-  throw new Error(`models.dev responded with ${response.status}`);
-}
-
-const openai = (await response.json())["openai"] as {
-  models: Record<
-    string,
-    {
-      cost: {
-        input: number;
-        output: number;
-        cache_read: number;
-      };
-    }
-  >;
-};

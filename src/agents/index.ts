@@ -73,7 +73,7 @@ export namespace Agent {
     opencode: loadOpenCodeAgent,
     "claude-code": () =>
       import("./claude-code.js").then((m) => createRegistration("claude-code", m)),
-    //codex: () => import("./codex.js").then(m => createRegistration("codex", m)),
+    codex: () => import("./codex.js").then((m) => createRegistration("codex", m)),
   };
 
   export function list(): Registration[] {
