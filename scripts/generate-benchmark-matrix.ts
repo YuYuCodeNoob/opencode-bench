@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { Agent } from "~/agents/index.js";
+import { Agent } from "~/src/agents/index.js";
 import { Task } from "~/src/tasks/index.js";
 
 await Agent.loadAll();

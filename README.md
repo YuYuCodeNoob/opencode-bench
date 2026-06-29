@@ -138,6 +138,16 @@ Test score aggregation:
 bun test tests/scoreAggregation.test.ts
 ```
 
+### Debugging
+
+Set `KEEP_TMP=1` to preserve the temporary repository clone (`/tmp/openreval-*`) after each episode completes. The path will be printed in the logs:
+
+```bash
+KEEP_TMP=1 orvl codex --model moonbridge/moonbridge --task helix-db-cli-update
+```
+
+This is useful for inspecting the agent's working directory, git history, and file changes after a run.
+
 ### Project Structure
 
 ```

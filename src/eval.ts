@@ -26,7 +26,7 @@ export namespace Eval {
       logger: Logger.Instance;
     },
   ) {
-    const timeoutMins = 20;
+    const timeoutMins = 40;
     opts.logger.log(`Starting episode with ${timeoutMins}min timeout...`);
     return await withRetries(
       () => runOnce(agentName, modelId, taskId, { logger: opts.logger }),
@@ -161,7 +161,11 @@ export namespace Eval {
         duration,
       };
     } finally {
-      await cleanupRepository(cwd, opts.logger);
+      if (process.env.KEEP_TMP) {
+        opts.logger.log(`Keeping temp dir: ${cwd}`);
+      } else {
+        await cleanupRepository(cwd, opts.logger);
+      }
     }
   }
 

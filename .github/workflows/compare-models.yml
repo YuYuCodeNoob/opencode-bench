@@ -18,6 +18,34 @@ on:
         description: opencode:deepseek/deepseek-v4-pro
         type: boolean
         default: false
+      workspace_workspace_deepseek_v4:
+        description: workspace:workspace/deepseek_v4
+        type: boolean
+        default: false
+      workspace_workspace_DeepSeek_V3.2:
+        description: workspace:workspace/DeepSeek-V3.2
+        type: boolean
+        default: false
+      workspace_workspace_qwen3.7_max:
+        description: workspace:workspace/qwen3.7-max
+        type: boolean
+        default: false
+      workspace_workspace_qwen3.7_plus:
+        description: workspace:workspace/qwen3.7-plus
+        type: boolean
+        default: false
+      workspace_workspace_qwen3.6_plus:
+        description: workspace:workspace/qwen3.6-plus
+        type: boolean
+        default: false
+      workspace_workspace_hw_glm_5:
+        description: workspace:workspace/hw-glm-5
+        type: boolean
+        default: false
+      workspace_workspace_glm_5:
+        description: workspace:workspace/glm-5
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read

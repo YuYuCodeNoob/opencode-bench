@@ -44,7 +44,7 @@ async function getOpencode() {
   if (!opencodePromise) {
     opencodePromise = createOpencode({
       port: await detectPort(4096),
-      timeout: 1_500_000, // 25 minutes timeout for server startup
+      timeout: 2_400_000, // 40 minutes timeout for server startup
       config: opencodeConfig,
     });
   }

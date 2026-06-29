@@ -74,6 +74,8 @@ export namespace Agent {
     "claude-code": () =>
       import("./claude-code.js").then((m) => createRegistration("claude-code", m)),
     codex: () => import("./codex.js").then((m) => createRegistration("codex", m)),
+    workspace: () =>
+      import("./workspace.js").then((m) => createRegistration("workspace", m)),
   };
 
   export function list(): Registration[] {
