@@ -26,10 +26,15 @@ cli.command(
   "generate",
   "Generate dataset for all tasks",
   async (yargs) =>
-    yargs.example([["orvl generate", "Generate dataset for all tasks"]]),
-  async () => {
+    yargs
+      .example([["orvl generate", "Generate dataset for all tasks"]])
+      .option("tasks-dir", {
+        type: "string",
+        description: "directory containing benchmark task folders"
+      }),
+  async ({ "tasks-dir": tasksDir }) => {
     const logger = Logger.create("[generate]");
-    await Task.generate({ logger });
+    await Task.generate({ logger, tasksDir });
   },
 );
 
@@ -53,14 +58,18 @@ cli.command(
         type: "string",
         description: "task to use in the format of repo@from..to",
         required: true,
+      })
+      .option("tasks-dir", {
+        type: "string",
+        description: "directory containing benchmark task folders"
       }),
-  async ({ agent: agentName, model: modelId, task: taskId }) => {
+  async ({ agent: agentName, model: modelId, task: taskId, "tasks-dir": tasksDir }) => {
     if (!agentName) throw new Error("Agent name is required");
 
     const logger = Logger.create(`[model ${modelId}]`);
 
     // Run eval
-    const result = await Eval.run(agentName, modelId, taskId, { logger });
+    const result = await Eval.run(agentName, modelId, taskId, { logger, tasksDir });
 
     // Summary episodes
     const summary = await Summarizer.summarizeRuns([result]);
