@@ -67,7 +67,7 @@ Guidelines:
 - Be objective and descriptive, not evaluative`.trim(),
           temperature: 0.3,
           prompt: `
-Repository: ${task.source.repo}
+Repository: ${task.source.type === 'github' ? task.source.repo : task.source.path}
 Model: ${model}
 Task: Implement changes from ${task.source.from} to ${task.source.to}
 

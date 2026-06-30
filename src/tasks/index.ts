@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { fileExists } from "~/src/util/fs.js";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { Logger } from "~/src/util/logger.js";
 import {
@@ -9,6 +9,7 @@ import {
   fetchCommits,
   fetchComparisonDiff,
 } from "~/src/util/github.js";
+import { assertLocalGitRepository, fetchLocalCommits } from "~/src/util/local-git.js";
 import { generateObject } from "ai";
 import { getZenLanguageModel } from "~/src/zenModels.js";
 import { Metric } from "~/src/metrics/index.js";
@@ -18,14 +19,24 @@ export namespace Task {
   const SAMPLE_DATASET_NAME = "_sample";
   const SAMPLE_DATASET_PATH = join(TASK_PATH, SAMPLE_DATASET_NAME);
   const GENERATE_MODEL_ID = "deepseek/deepseek-v4-flash";
+  const GithubSourceSchema = z.object({
+    type: z.literal("github").default("github"),
+    repo: z
+      .string()
+      .regex(/^[^/]+\/[^/]+$/, "repo must follow the format <owner>/<name>."),
+    from: z.string().min(1, "from commit SHA is required."),
+    to: z.string().min(1, "to commit SHA is required."),
+  });
+
+  const LocalSourceSchema = z.object({
+    type: z.literal("local"),
+    path: z.string().min(1, "local repository path is required."),
+    from: z.string().min(1, "from commit SHA is required."),
+    to: z.string().min(1, "to commit SHA is required."),
+  });
+
   const definitionSchema = z.object({
-    source: z.object({
-      repo: z
-        .string()
-        .regex(/^[^/]+\/[^/]+$/, "repo must follow the format <owner>/<name>."),
-      from: z.string().min(1, "from commit SHA is required."),
-      to: z.string().min(1, "to commit SHA is required."),
-    }),
+    source: z.discriminatedUnion("type", [GithubSourceSchema, LocalSourceSchema]),
     context: z.string().min(1).optional(),
     metrics: z.array(
       z.object({
@@ -50,15 +61,25 @@ export namespace Task {
     generated_at: z.string(),
     prompts: z.array(promptSchema),
   });
-  export type Instance = Awaited<ReturnType<typeof load>>[number];
+  export interface LoadOptions {
+    tasksDir?: string;
+  }
 
-  let data: Awaited<ReturnType<typeof load>> | undefined;
+  export type Source = z.infer<typeof GithubSourceSchema> | z.infer<typeof LocalSourceSchema>;
 
-  export async function get(taskId: string) {
-    if (!data) data = await load();
+  let dataCache = new Map<string, Awaited<ReturnType<typeof load>>>();
 
+  export async function get(taskId: string, opts?: LoadOptions) {
+    const tasksDir = opts?.tasksDir || TASK_PATH;
+    const resolvedTasksDir = resolve(tasksDir);
+
+    if (!dataCache.has(resolvedTasksDir)) {
+      dataCache.set(resolvedTasksDir, await load({ tasksDir }));
+    }
+
+    const data = dataCache.get(resolvedTasksDir)!;
     const task = data.find((task) => task.id === taskId);
-    if (!task) throw new Error(`Task ${taskId} was not found.`);
+    if (!task) throw new Error(`Task ${taskId} was not found in ${resolvedTasksDir}.`);
 
     if (!task.metrics.length)
       throw new Error(`Task ${taskId} has no score assignments.`);
@@ -71,8 +92,11 @@ export namespace Task {
     return task;
   }
 
-  export async function listNames() {
-    const folders = await readdir(TASK_PATH, { withFileTypes: true });
+  export async function listNames(opts?: LoadOptions) {
+    const tasksDir = opts?.tasksDir || TASK_PATH;
+    const resolvedTasksDir = resolve(tasksDir);
+
+    const folders = await readdir(resolvedTasksDir, { withFileTypes: true });
     return await Promise.all(
       folders
         .filter((folder) => folder.isDirectory())
@@ -82,17 +106,27 @@ export namespace Task {
     );
   }
 
-  async function load() {
-    const folders = await listNames();
+  async function load(opts?: LoadOptions) {
+    const tasksDir = opts?.tasksDir || TASK_PATH;
+    const resolvedTasksDir = resolve(tasksDir);
+
+    const folders = await listNames(opts);
     return await Promise.all(
       folders.map(async (folderName) => {
         const [defYml, promptYml, diff] = await Promise.all([
-          readFile(join(TASK_PATH, folderName, "definition.yml"), "utf-8"),
-          readFile(join(TASK_PATH, folderName, "prompt.yml"), "utf-8"),
-          readFile(join(TASK_PATH, folderName, "diff.patch"), "utf-8"),
+          readFile(join(resolvedTasksDir, folderName, "definition.yml"), "utf-8"),
+          readFile(join(resolvedTasksDir, folderName, "prompt.yml"), "utf-8"),
+          readFile(join(resolvedTasksDir, folderName, "diff.patch"), "utf-8"),
         ]);
+        const def = definitionSchema.parse(parseYaml(defYml));
+
+        // Validate local repositories
+        if (def.source.type === "local") {
+          await assertLocalGitRepository(def.source.path);
+        }
+
         return {
-          ...definitionSchema.parse(parseYaml(defYml)),
+          ...def,
           id: folderName,
           //id: `${def.repo}@${def.from.slice(0, 7)}..${def.to.slice(0, 7)}`,
           prompts: promptsSchema.parse(parseYaml(promptYml)).prompts,
@@ -102,10 +136,13 @@ export namespace Task {
     );
   }
 
-  export async function generate(opts: { logger: Logger.Instance }) {
+  export async function generate(opts: { logger: Logger.Instance } & LoadOptions) {
     opts.logger.log(`Starting dataset generation...`);
-    const folders = await listNames();
+    const folders = await listNames(opts);
     opts.logger.log(`Found ${folders.length} tasks`);
+
+    const tasksDir = opts.tasksDir || TASK_PATH;
+    const resolvedTasksDir = resolve(tasksDir);
 
     for (const folderName of folders) {
       const logger = opts.logger.child(`[${folderName}]`);
@@ -113,35 +150,18 @@ export namespace Task {
       try {
         logger.log(`Parsing task definition...`);
         const defYml = await readFile(
-          join(TASK_PATH, folderName, "definition.yml"),
+          join(resolvedTasksDir, folderName, "definition.yml"),
           "utf-8",
         );
         const def = definitionSchema.parse(parseYaml(defYml));
         const source = def.source;
-        const [owner, repo] = source.repo.split("/", 2);
 
-        // generate diff
-        const diffPath = join(TASK_PATH, folderName, "diff.patch");
-        if (!(await fileExists(diffPath))) {
-          logger.log(`Fetching task commits from GitHub...`);
-          const diff = await fetchComparisonDiff(
-            owner,
-            repo,
-            source.from,
-            source.to,
-          );
-          if (diff.trim().length === 0)
-            throw new Error(logger.format(`Diff is empty for ${source.repo}`));
-          await writeFile(diffPath, diff, "utf-8");
-        }
-
-        // generate prompts
-        const promptPath = join(TASK_PATH, folderName, "prompt.yml");
-        if (!(await fileExists(promptPath))) {
-          logger.log(`Generating task prompts...`);
-          const commits = await fetchCommits(
-            owner,
-            repo,
+        // Handle different source types
+        if (source.type === "local") {
+          await assertLocalGitRepository(source.path);
+          const [owner, repo] = ["local", source.path];
+          const commits = await fetchLocalCommits(
+            source.path,
             source.from,
             source.to,
           );
@@ -157,13 +177,61 @@ export namespace Task {
           );
 
           await writeFile(
-            promptPath,
+            join(resolvedTasksDir, folderName, "prompt.yml"),
             stringifyYaml(
               { generated_at: new Date().toISOString(), prompts },
               { lineWidth: 0 },
             ),
             "utf-8",
           );
+        } else {
+          const [owner, repo] = source.repo.split("/", 2);
+
+          // generate diff
+          const diffPath = join(resolvedTasksDir, folderName, "diff.patch");
+          if (!(await fileExists(diffPath))) {
+            logger.log(`Fetching task commits from GitHub...`);
+            const diff = await fetchComparisonDiff(
+              owner,
+              repo,
+              source.from,
+              source.to,
+            );
+            if (diff.trim().length === 0)
+              throw new Error(logger.format(`Diff is empty for ${source.repo}`));
+            await writeFile(diffPath, diff, "utf-8");
+          }
+
+          // generate prompts
+          const promptPath = join(resolvedTasksDir, folderName, "prompt.yml");
+          if (!(await fileExists(promptPath))) {
+            logger.log(`Generating task prompts...`);
+            const commits = await fetchCommits(
+              owner,
+              repo,
+              source.from,
+              source.to,
+            );
+            if (commits.length === 0)
+              throw new Error(logger.format("No commits found"));
+
+            const prompts = await Promise.all(
+              commits.map((diff) =>
+                generatePrompt(def, diff, {
+                  logger: logger.child(`[commit ${diff.sha.slice(0, 7)}]`),
+                }),
+              ),
+            );
+
+            await writeFile(
+              promptPath,
+              stringifyYaml(
+                { generated_at: new Date().toISOString(), prompts },
+                { lineWidth: 0 },
+              ),
+              "utf-8",
+            );
+          }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -218,7 +286,7 @@ Always respond strictly as JSON conforming to the schema. Do not add commentary.
         ].join("\n"),
         temperature: 0,
         prompt: [
-          `Repository: ${def.source.repo}`,
+          `Repository: ${def.source.type === 'github' ? def.source.repo : def.source.path}`,
           `Base commit: ${def.source.from}`,
           `Target commit: ${def.source.to}`,
           "",

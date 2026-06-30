@@ -54,7 +54,8 @@ export namespace Eval {
 
     try {
       opts.logger.log(`Cloning repository to ${cwd}...`);
-      await cloneRepositoryAtCommit(task.source.repo, task.source.from);
+      const repoUrl = task.source.type === 'github' ? task.source.repo : task.source.path;
+      await cloneRepositoryAtCommit(repoUrl, task.source.from);
 
       opts.logger.log(`Running pre-task commands...`);
       const beforeResults: Record<string, Metric.CommandExecution[]> = {};
@@ -72,7 +73,7 @@ export namespace Eval {
       const actions: string[] = [];
       for (const { commit, prompt } of task.prompts) {
         const cl = opts.logger.child(
-          `[prompt ${task.source.repo.split("/")[1]}@${commit.slice(0, 7)}]`,
+          `[prompt ${task.source.type === 'github' ? task.source.repo.split("/")[1] : 'local'}@${commit.slice(0, 7)}]`,
         );
 
         const startedAt = Date.now();
