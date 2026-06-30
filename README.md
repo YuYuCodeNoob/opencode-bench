@@ -43,6 +43,66 @@ orvl opencode --model opencode/gpt-5-codex --eval DataDog/datadog-lambda-python 
 
 Both `--model` and `--eval` are required. Each invocation executes three isolated episodes (fresh clones) and aggregates the judge scores before exporting results.
 
+### Custom Tasks
+
+You can use custom task definitions with OpenCode Bench in three ways:
+
+#### 1. Using `--tasks-dir` CLI Option
+
+Specify a directory containing custom task folders with the `--tasks-dir` flag:
+
+```bash
+orvl opencode --model opencode/claude-sonnet-4-5 --tasks-dir ./my-custom-tasks
+```
+
+This will load all task folders from the specified directory instead of the default `src/tasks/` folder.
+
+#### 2. GitHub Task Format
+
+Task folders contain three files:
+- `definition.yml` - Task configuration with source metadata
+- `prompt.yml` - Generated prompts (auto-generated if missing)
+- `diff.patch` - Git diff of the changes (auto-generated if missing)
+
+**Example `definition.yml` for GitHub tasks:**
+```yaml
+source:
+  type: github
+  repo: DataDog/datadog-lambda-python
+  from: 93d4a078d3a8f892f0675d9d06f692d557b74755
+  to: d776378a8148f9f0a83c767d91capybarae8d3a9d76
+context: "Optional additional context for judges"
+metrics:
+  - name: api-signature
+    weight: 0.2
+  - name: logic-equivalence
+    weight: 0.3
+  - name: integration-points
+    weight: 0.2
+  - name: test-coverage
+    weight: 0.2
+  - name: checks
+    weight: 0.1
+```
+
+#### 3. Local Git Repository Tasks
+
+You can also use local git repositories as task sources:
+
+**Example `definition.yml` for local tasks:**
+```yaml
+source:
+  type: local
+  repo: /path/to/local/repository
+  from: 93d4a078d3a8f892f0675d9d06f692d557b74755
+  to: d776378a8148f9f0a83c767d91capybarae8d3a9d76
+```
+
+**Note:** The `generate` command also supports `--tasks-dir` to generate datasets for custom tasks:
+```bash
+orvl generate --tasks-dir ./my-custom-tasks
+```
+
 ### Development Mode
 
 During development, run the CLI directly with Bun:
@@ -57,7 +117,7 @@ OpenCode Bench evaluates AI coding agents by:
 
 1. **Selecting a baseline** - Checking out a repository at a specific commit
 2. **Generating a task** - Creating a prompt from a later production commit
-3. **Running the agent** - Executing the AI agent with a 30-minute timeout
+3. **Running the agent** - Executing the AI agent with a 40-minute timeout
 4. **Comparing outputs** - Diffing the agent's changes against the actual production code
 5. **Multi-judge scoring** - Three LLM judges evaluate across five dimensions
 6. **Aggregating results** - Computing weighted scores with variance penalties
