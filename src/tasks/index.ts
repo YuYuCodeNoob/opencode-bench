@@ -9,7 +9,7 @@ import {
   fetchCommits,
   fetchComparisonDiff,
 } from "~/src/util/github.js";
-import { assertLocalGitRepository, fetchLocalCommits } from "~/src/util/local-git.js";
+import { assertLocalGitRepository, fetchLocalCommits, fetchLocalComparisonDiff } from "~/src/util/local-git.js";
 import { generateObject } from "ai";
 import { getZenLanguageModel } from "~/src/zenModels.js";
 import { Metric } from "~/src/metrics/index.js";
@@ -157,14 +157,55 @@ export namespace Task {
         const source = def.source;
 
         // Handle different source types
-        if (source.type === "local") {
-          await assertLocalGitRepository(source.path);
-          const [owner, repo] = ["local", source.path];
-          const commits = await fetchLocalCommits(
-            source.path,
-            source.from,
-            source.to,
-          );
+        const [owner, repo] = source.type === "github" ? source.repo.split("/", 2) : ["local", source.path];
+
+        // generate diff
+        const diffPath = join(resolvedTasksDir, folderName, "diff.patch");
+        if (!(await fileExists(diffPath))) {
+          logger.log(`Fetching task diff from ${source.type} source...`);
+          let diff: string;
+
+          if (source.type === "local") {
+            diff = await fetchLocalComparisonDiff(
+              source.path,
+              source.from,
+              source.to,
+            );
+          } else {
+            diff = await fetchComparisonDiff(
+              owner,
+              repo,
+              source.from,
+              source.to,
+            );
+          }
+
+          if (diff.trim().length === 0)
+            throw new Error(logger.format(`Diff is empty for ${source.type === "local" ? source.path : source.repo}`));
+          await writeFile(diffPath, diff, "utf-8");
+        }
+
+        // generate prompts
+        const promptPath = join(resolvedTasksDir, folderName, "prompt.yml");
+        if (!(await fileExists(promptPath))) {
+          logger.log(`Generating task prompts from ${source.type} source...`);
+          let commits: CommitDiff[];
+
+          if (source.type === "local") {
+            commits = await fetchLocalCommits(
+              source.path,
+              source.from,
+              source.to,
+            );
+          } else {
+            commits = await fetchCommits(
+              owner,
+              repo,
+              source.from,
+              source.to,
+            );
+          }
+
           if (commits.length === 0)
             throw new Error(logger.format("No commits found"));
 
@@ -177,61 +218,13 @@ export namespace Task {
           );
 
           await writeFile(
-            join(resolvedTasksDir, folderName, "prompt.yml"),
+            promptPath,
             stringifyYaml(
               { generated_at: new Date().toISOString(), prompts },
               { lineWidth: 0 },
             ),
             "utf-8",
           );
-        } else {
-          const [owner, repo] = source.repo.split("/", 2);
-
-          // generate diff
-          const diffPath = join(resolvedTasksDir, folderName, "diff.patch");
-          if (!(await fileExists(diffPath))) {
-            logger.log(`Fetching task commits from GitHub...`);
-            const diff = await fetchComparisonDiff(
-              owner,
-              repo,
-              source.from,
-              source.to,
-            );
-            if (diff.trim().length === 0)
-              throw new Error(logger.format(`Diff is empty for ${source.repo}`));
-            await writeFile(diffPath, diff, "utf-8");
-          }
-
-          // generate prompts
-          const promptPath = join(resolvedTasksDir, folderName, "prompt.yml");
-          if (!(await fileExists(promptPath))) {
-            logger.log(`Generating task prompts...`);
-            const commits = await fetchCommits(
-              owner,
-              repo,
-              source.from,
-              source.to,
-            );
-            if (commits.length === 0)
-              throw new Error(logger.format("No commits found"));
-
-            const prompts = await Promise.all(
-              commits.map((diff) =>
-                generatePrompt(def, diff, {
-                  logger: logger.child(`[commit ${diff.sha.slice(0, 7)}]`),
-                }),
-              ),
-            );
-
-            await writeFile(
-              promptPath,
-              stringifyYaml(
-                { generated_at: new Date().toISOString(), prompts },
-                { lineWidth: 0 },
-              ),
-              "utf-8",
-            );
-          }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
