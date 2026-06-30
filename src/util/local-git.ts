@@ -1,10 +1,9 @@
-import { $ } from "./shell";
-import type { CommitDiff } from "./github";
+import { $ } from "./shell.js";
+import type { CommitDiff } from "./github.js";
 
 export async function assertLocalGitRepository(repoPath: string): Promise<void> {
   try {
-    $.cwd(repoPath);
-    await $`git rev-parse --is-inside-work-tree`.quiet();
+    await $`git -C ${repoPath} rev-parse --is-inside-work-tree`.quiet();
   } catch (error) {
     throw new Error(
       `Path '${repoPath}' is not a valid git repository: ${(error as Error).message}`
@@ -19,9 +18,8 @@ export async function fetchLocalComparisonDiff(
 ): Promise<string> {
   await assertLocalGitRepository(repoPath);
 
-  $.cwd(repoPath);
   try {
-    const diff = await $`git diff ${from}...${to}`.text();
+    const diff = await $`git -C ${repoPath} diff --binary ${from}..${to}`.text();
 
     if (diff.trim().length === 0) {
       throw new Error(
@@ -44,26 +42,31 @@ export async function fetchLocalCommits(
 ): Promise<CommitDiff[]> {
   await assertLocalGitRepository(repoPath);
 
-  $.cwd(repoPath);
   try {
-    // Get list of commits between from and to
-    const commitList = await $`git log --pretty=format:"%H %s" ${from}...${to}`.text();
-    const commitSHAs = commitList
+    // Get list of commits between from and to with robust delimiter
+    const commitList = await $`git -C ${repoPath} log --pretty=format:"%H%x00%s" ${from}..${to}`.text();
+    const commits = commitList
       .split("\n")
       .filter(line => line.trim() !== "")
-      .map(line => line.split(" ")[0])
-      .filter(sha => sha !== undefined);
+      .map(line => {
+        const nullIndex = line.indexOf("\x00");
+        if (nullIndex === -1) return null;
+        return {
+          sha: line.slice(0, nullIndex),
+          title: line.slice(nullIndex + 1)
+        };
+      })
+      .filter(commit => commit !== null && commit.sha.trim() !== "");
 
-    if (commitSHAs.length === 0) {
+    if (commits.length === 0) {
       return [];
     }
 
     const results = await Promise.all(
-      commitSHAs.map(async (sha) => {
+      commits.map(async ({ sha, title }) => {
         try {
-          // Get full diff for each commit
-          const diff = await $`git show ${sha}`.text();
-          const title = (await $`git show --pretty=format:"%s" -s ${sha}`.text()).trim();
+          // Get diff content suitable for prompts - no full metadata
+          const diff = await $`git -C ${repoPath} show --format= --binary ${sha}`.text();
 
           return { sha, title, diff };
         } catch (error) {
@@ -95,8 +98,7 @@ export async function cloneLocalRepositoryAtCommit(
     // Clone the repository and checkout specific commit
     await $`git clone ${repoPath} ${destination}`.quiet();
 
-    $.cwd(destination);
-    await $`git checkout ${commit}`.quiet();
+    await $`git -C ${destination} checkout ${commit}`.quiet();
   } catch (error) {
     throw new Error(
       `Failed to clone repository at ${repoPath} to ${destination} at commit ${commit}: ${(error as Error).message}`
