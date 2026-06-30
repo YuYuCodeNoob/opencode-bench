@@ -6,11 +6,12 @@ usage() {
 Usage:
   scripts/generate-local-task.sh \
     --repo /path/to/local/repo \
-    --from <base-commit> \
-    --to <target-commit> \
+    [--from <base-commit>] \
+    [--to <target-commit>] \
     --task <task-id> \
     [--setup "command"]... \
     [--check "command"]... \
+    [--limit 30] \
     [--force]
 
 Generates a benchmark task in src/tasks/<task-id>/ using the existing task
@@ -19,7 +20,16 @@ format:
   - diff.patch: git diff --binary <from>..<to>
   - prompt.yml: prompts generated directly from commit messages
 
+If --from or --to is omitted in an interactive terminal, the script lists
+recent commits and lets you choose by number or enter a commit SHA (Ctrl+C to exit).
+
 Examples:
+  scripts/generate-local-task.sh \
+    --repo ~/repos/my-project \
+    --task my-project-feature \
+    --setup "bun install" \
+    --check "bun test"
+
   scripts/generate-local-task.sh \
     --repo ~/repos/my-project \
     --from abc123 \
@@ -35,6 +45,7 @@ from=""
 to=""
 task=""
 force=0
+limit=30
 setup_cmds=()
 check_cmds=()
 
@@ -68,6 +79,10 @@ while [[ $# -gt 0 ]]; do
       force=1
       shift
       ;;
+    --limit)
+      limit="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -80,14 +95,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$repo" || -z "$from" || -z "$to" || -z "$task" ]]; then
-  echo "Missing required --repo, --from, --to, or --task." >&2
+if [[ -z "$repo" || -z "$task" ]]; then
+  echo "Missing required --repo or --task." >&2
   usage >&2
   exit 2
 fi
 
 if [[ ! "$task" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "Invalid task id '$task'. Use only letters, numbers, dot, underscore, and dash." >&2
+  exit 2
+fi
+
+if [[ ! "$limit" =~ ^[0-9]+$ || "$limit" -lt 1 ]]; then
+  echo "--limit must be a positive integer." >&2
   exit 2
 fi
 
@@ -106,6 +126,58 @@ fi
 if [[ "$(git -C "$repo_abs" rev-parse --is-inside-work-tree 2>/dev/null)" != "true" ]]; then
   echo "Not a git repository: $repo_abs" >&2
   exit 2
+fi
+
+# Interactive commit selection when --from or --to is not provided
+select_commit() {
+  local label="$1"
+  local selected=""
+  local full_sha=""
+
+  if [[ ! -t 0 ]]; then
+    echo "--$label is required when not running interactively." >&2
+    exit 2
+  fi
+
+  echo "Select --$label commit from $repo_abs:" >&2
+  mapfile -t commit_lines < <(git -C "$repo_abs" log --date=short --pretty=format:'%h %ad %s' -n "$limit")
+  if [[ ${#commit_lines[@]} -eq 0 ]]; then
+    echo "No commits found in $repo_abs" >&2
+    exit 2
+  fi
+
+  local i=1
+  for line in "${commit_lines[@]}"; do
+    printf '  %2d) %s\n' "$i" "$line" >&2
+    i=$((i + 1))
+  done
+
+  while true; do
+    printf 'Enter number or commit SHA (Ctrl+C to exit): ' >&2
+    IFS= read -r selected
+    if [[ -z "$selected" ]]; then
+      echo "Please enter a number or commit SHA." >&2
+      continue
+    fi
+
+    if [[ "$selected" =~ ^[0-9]+$ && "$selected" -ge 1 && "$selected" -le ${#commit_lines[@]} ]]; then
+      selected="${commit_lines[$((selected - 1))]%% *}"
+    fi
+
+    if full_sha=$(git -C "$repo_abs" rev-parse --verify "$selected^{commit}" 2>/dev/null); then
+      printf '%s\n' "$full_sha"
+      return 0
+    fi
+
+    echo "Commit not found: $selected" >&2
+  done
+}
+
+if [[ -z "$from" ]]; then
+  from=$(select_commit from)
+fi
+if [[ -z "$to" ]]; then
+  to=$(select_commit to)
 fi
 
 git -C "$repo_abs" rev-parse --verify "$from^{commit}" >/dev/null
@@ -139,6 +211,7 @@ fi
 
 python3 - "$task_dir" "$repo_abs" "$from" "$to" "${setup_cmds[@]}" -- "${check_cmds[@]}" <<'PY'
 import datetime
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -175,6 +248,11 @@ if not prompts:
     raise SystemExit(f"No commits found in range {from_ref}..{to_ref}")
 
 def yaml_quote(value: str) -> str:
+    # Force quote YAML booleans and numbers to prevent type coercion
+    if value.lower() in ("true", "false", "yes", "no", "on", "off"):
+        return f"'{value}'"
+    if re.fullmatch(r"-?\d+(\.\d+)?([eE][+-]?\d+)?", value):
+        return f"'{value}'"
     if value == "":
         return "''"
     if any(ch in value for ch in ":#{}[],&*?|-<>=!%@`\\\"'") or value.strip() != value:
