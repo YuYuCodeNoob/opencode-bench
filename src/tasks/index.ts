@@ -19,8 +19,9 @@ export namespace Task {
   const SAMPLE_DATASET_NAME = "_sample";
   const SAMPLE_DATASET_PATH = join(TASK_PATH, SAMPLE_DATASET_NAME);
   const GENERATE_MODEL_ID = "deepseek/deepseek-v4-flash";
+  // Base schemas without type defaults
   const GithubSourceSchema = z.object({
-    type: z.literal("github").default("github"),
+    type: z.literal("github"),
     repo: z
       .string()
       .regex(/^[^/]+\/[^/]+$/, "repo must follow the format <owner>/<name>."),
@@ -30,13 +31,46 @@ export namespace Task {
 
   const LocalSourceSchema = z.object({
     type: z.literal("local"),
-    path: z.string().min(1, "local repository path is required."),
+    repo: z.string().min(1, "local repository path is required."),
     from: z.string().min(1, "from commit SHA is required."),
     to: z.string().min(1, "to commit SHA is required."),
   });
 
+  // Create a preprocessor to handle backward compatibility
+  // - Adds default type "github" for sources with repo but no type
+  // - Converts old "path" field to new "repo" field for local sources
+  const sourcePreprocessor = z.preprocess((val) => {
+    if (typeof val === "object" && val !== null) {
+      // Handle old GitHub format without type field
+      if ('repo' in val && !('type' in val)) {
+        return { ...val, type: "github" };
+      }
+      // Handle old local format with path field
+      if ('path' in val && !('repo' in val)) {
+        return { ...val, repo: val.path, type: "local" };
+      }
+    }
+    return val;
+  });
+
   const definitionSchema = z.object({
-    source: z.discriminatedUnion("type", [GithubSourceSchema, LocalSourceSchema]),
+    source: z
+      .preprocess((val) => {
+        if (typeof val === "object" && val !== null) {
+          // Handle old GitHub format without type field
+          if ('repo' in val && !('type' in val)) {
+            return { ...val, type: "github" };
+          }
+          // Handle old local format with path field
+          if ('path' in val && !('repo' in val)) {
+            return { ...val, repo: val.path, type: "local" };
+          }
+        }
+        return val;
+      }, z.discriminatedUnion("type", [
+        GithubSourceSchema,
+        LocalSourceSchema,
+      ])),
     context: z.string().min(1).optional(),
     metrics: z.array(
       z.object({
@@ -122,7 +156,7 @@ export namespace Task {
 
         // Validate local repositories
         if (def.source.type === "local") {
-          await assertLocalGitRepository(def.source.path);
+          await assertLocalGitRepository(def.source.repo);
         }
 
         return {
@@ -157,7 +191,7 @@ export namespace Task {
         const source = def.source;
 
         // Handle different source types
-        const [owner, repo] = source.type === "github" ? source.repo.split("/", 2) : ["local", source.path];
+        const [owner, repo] = source.type === "github" ? source.repo.split("/", 2) : ["local", source.repo];
 
         // generate diff
         const diffPath = join(resolvedTasksDir, folderName, "diff.patch");
@@ -167,7 +201,7 @@ export namespace Task {
 
           if (source.type === "local") {
             diff = await fetchLocalComparisonDiff(
-              source.path,
+              source.repo,
               source.from,
               source.to,
             );
@@ -193,7 +227,7 @@ export namespace Task {
 
           if (source.type === "local") {
             commits = await fetchLocalCommits(
-              source.path,
+              source.repo,
               source.from,
               source.to,
             );
@@ -279,7 +313,7 @@ Always respond strictly as JSON conforming to the schema. Do not add commentary.
         ].join("\n"),
         temperature: 0,
         prompt: [
-          `Repository: ${def.source.type === 'github' ? def.source.repo : def.source.path}`,
+          `Repository: ${def.source.type === 'github' ? def.source.repo : def.source.repo}`,
           `Base commit: ${def.source.from}`,
           `Target commit: ${def.source.to}`,
           "",

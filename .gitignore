@@ -3,4 +3,5 @@ dist
 benchmark.json
 results/
 .DS_Store
-.env
+.env*.worktree
+*.git

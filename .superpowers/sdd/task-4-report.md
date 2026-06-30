@@ -30,7 +30,7 @@ Successfully implemented Task 4 which adds support for routing evaluation clonin
 
 ## Commit Details
 
-**Commit Hash**: TODO - will be updated after committing
+**Commit Hash**: `b4cd6e3`
 
 **One-line build summary**: `feat: add local repository cloning support and tasksDir option`
 

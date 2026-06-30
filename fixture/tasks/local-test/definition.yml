@@ -1,0 +1,10 @@
+source:
+  type: local
+  path: /tmp/tmp.Gd7TNc7dz4
+  from: 79c93b4
+  to: 6b21b93
+metrics:
+  - name: api-signature
+    weight: 0.2
+  - name: logic-equivalence
+    weight: 0.3

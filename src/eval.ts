@@ -58,9 +58,9 @@ export namespace Eval {
     try {
       opts.logger.log(`Cloning repository to ${cwd}...`);
       if (task.source.type === 'local') {
-        await cloneLocalRepositoryAtCommit(task.source.path, task.source.from, cwd);
+        await cloneLocalRepositoryAtCommit(task.source.repo, task.source.from, cwd);
       } else {
-        const repoUrl = task.source.type === 'github' ? task.source.repo : task.source.path;
+        const repoUrl = task.source.type === 'github' ? task.source.repo : task.source.repo;
         await cloneRepositoryAtCommit(repoUrl, task.source.from);
       }
 

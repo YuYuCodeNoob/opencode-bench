@@ -1,0 +1,7 @@
+diff --git a/file2.txt b/file2.txt
+new file mode 100644
+index 0000000..2ff0cc0
+--- /dev/null
++++ b/file2.txt
+@@ -0,0 +1 @@
++second commit
