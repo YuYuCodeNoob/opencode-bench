@@ -13,6 +13,7 @@ import { average, variance, weightedSum } from "./util/math.js";
 import { Judge } from "./judges.js";
 import { getZenLanguageModel } from "./zenModels.js";
 import { withRetries } from "./util/retry.js";
+import { cloneLocalRepositoryAtCommit } from "./util/local-git.js";
 
 export namespace Eval {
   export const DISAGREEMENT_PENALTY = 0.5;
@@ -24,12 +25,13 @@ export namespace Eval {
     taskId: string,
     opts: {
       logger: Logger.Instance;
+      tasksDir?: string;
     },
   ) {
     const timeoutMins = 40;
     opts.logger.log(`Starting episode with ${timeoutMins}min timeout...`);
     return await withRetries(
-      () => runOnce(agentName, modelId, taskId, { logger: opts.logger }),
+      () => runOnce(agentName, modelId, taskId, { logger: opts.logger, tasksDir: opts.tasksDir }),
       {
         retries: 0,
         timeoutMs: timeoutMins * 60 * 1000,
@@ -44,18 +46,23 @@ export namespace Eval {
     taskId: string,
     opts: {
       logger: Logger.Instance;
+      tasksDir?: string;
     },
   ) {
     const agent = await Agent.get(agentName);
     Agent.validateModel(agent, modelId);
-    const task = await Task.get(taskId);
+    const task = await Task.get(taskId, { tasksDir: opts.tasksDir });
     const cwd = await mkdtemp(join(tmpdir(), "openreval-"));
     $.cwd(cwd);
 
     try {
       opts.logger.log(`Cloning repository to ${cwd}...`);
-      const repoUrl = task.source.type === 'github' ? task.source.repo : task.source.path;
-      await cloneRepositoryAtCommit(repoUrl, task.source.from);
+      if (task.source.type === 'local') {
+        await cloneLocalRepositoryAtCommit(task.source.path, task.source.from, cwd);
+      } else {
+        const repoUrl = task.source.type === 'github' ? task.source.repo : task.source.path;
+        await cloneRepositoryAtCommit(repoUrl, task.source.from);
+      }
 
       opts.logger.log(`Running pre-task commands...`);
       const beforeResults: Record<string, Metric.CommandExecution[]> = {};
